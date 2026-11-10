@@ -34,3 +34,4 @@ example/run_database_*/results_database.json
 test_*/figures*
 test_*/temp_results
 test_*/*.json
+*.pyd

@@ -38,13 +38,14 @@ import os
 from pathlib import Path
 import numpy as np
 from scipy.interpolate import CubicSpline
+from scipy.optimize import brentq
 from scipy import integrate
 import matplotlib.pyplot as plt
 from typing import Tuple
 from .ibl import IBL
 
 try:
-    import tsfoil_fortran as tsf
+    from . import tsfoil_fortran as tsf
 except ImportError as e:
     print("ERROR: Could not import tsfoil_fortran module!")
     print(f"Import error: {e}")
@@ -554,6 +555,15 @@ class PyTSFoil(object):
             'BETA_SONIC': 500.0,  # Sonic penalty strength multiplier (EPS * BETA_SONIC)
             'EPS_AMPL':   200.0,  # EPS amplification factor at trailing-edge columns in CFS
             'ITER_START_CFS': 100,  # Minimum iteration count before CFS can trigger
+
+            # Shock operator and lift-based convergence
+            'FCR':          True,   # Fully conservative relaxation (TSFOIL2 FCR); False = non-conservative
+            'CL_WINDOW':    0,      # Iterations between lift checks for convergence (0 = off, use CVERGE only)
+            'CL_TOL':       1.0E-5, # Lift change over CL_WINDOW iterations accepted as converged
+            'CL_ERROR_MAX': 1.0E-3, # Largest update error allowed with lift-based convergence
+
+            # Surface slope for the body boundary condition
+            'slope_method': 'spline',  # 'spline' = cubic spline of y(x); 'contour' = arc-length spline, cell-averaged
         }
         
         # Default parameters
@@ -809,6 +819,75 @@ class PyTSFoil(object):
         '''
         return calculate_cp_isentropic(ma, minf, gamma=self._gamma)
 
+    def compute_contour_slopes(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        '''
+        Surface ordinates and slopes at the airfoil mesh points from an arc-length spline
+        of the closed contour (used when ``slope_method = 'contour'``).
+
+        x(s) and y(s) are splined together, the leading edge is the minimum of x(s), and each
+        mesh point gets the slope averaged over its column, (y(x+) - y(x-)) / (x+ - x-), with
+        x+- the midpoints to the neighbouring mesh points. This is the wall mass flux of the
+        column, it is bounded at the leading edge, and it does not depend on how the input
+        points are spaced.
+
+        Returns
+        -------
+        yu, yl: np.ndarray
+            Upper and lower surface ordinates at the airfoil mesh points.
+
+        dyu, dyl: np.ndarray
+            Upper and lower surface slopes, averaged over each mesh column.
+        '''
+        x = np.asarray(self.airfoil['x'], dtype=float)
+        y = np.asarray(self.airfoil['y'], dtype=float)
+
+        # Arc length, without repeated points
+        keep = np.r_[True, np.hypot(np.diff(x), np.diff(y)) > 1e-12]
+        x, y = x[keep], y[keep]
+        s = np.r_[0.0, np.cumsum(np.hypot(np.diff(x), np.diff(y)))]
+        spline_x = CubicSpline(s, x)
+        spline_y = CubicSpline(s, y)
+
+        # Leading edge: dx/ds = 0 near the input point with the smallest x
+        i_min = int(np.argmin(x))
+        s_search = np.linspace(s[max(i_min - 2, 0)], s[min(i_min + 2, len(s) - 1)], 4001)
+        k = int(np.argmin(spline_x(s_search)))
+        s_le = brentq(lambda q: spline_x(q, 1), s_search[max(k - 1, 0)], s_search[min(k + 1, len(s_search) - 1)])
+        x_le = float(spline_x(s_le))
+
+        def ordinate(x_query, upper):
+            # Surface y at each x, on the upper (s < s_le) or lower (s > s_le) branch
+            s_start, s_end = (s[0], s_le) if upper else (s_le, s[-1])
+            values = np.empty(len(x_query))
+            for i, xq in enumerate(x_query):
+                if xq <= x_le:
+                    values[i] = spline_y(s_le)
+                    continue
+                f_start, f_end = spline_x(s_start) - xq, spline_x(s_end) - xq
+                if f_start * f_end > 0:
+                    # Beyond the trailing-edge point of this branch
+                    values[i] = spline_y(s_start if upper else s_end)
+                    continue
+                values[i] = spline_y(brentq(lambda q: spline_x(q) - xq, s_start, s_end, xtol=1e-14))
+            return values
+
+        # Column faces of each airfoil mesh point, clipped to the chord
+        xx = np.asarray(self.mesh['xx'], dtype=float)
+        ile = self.mesh['ile']
+        nfoil = self.mesh['nfoil']
+        xfoil = np.asarray(self.mesh['xx_airfoil'], dtype=float)
+        x_mid = 0.5 * (xx[ile - 1:ile + nfoil] + xx[ile:ile + nfoil + 1])
+        x_minus = np.clip(x_mid[:-1], 0.0, 1.0)
+        x_plus = np.clip(x_mid[1:], 0.0, 1.0)
+        x_minus[0] = 0.0
+
+        yu = ordinate(xfoil, True)
+        yl = ordinate(xfoil, False)
+        dyu = (ordinate(x_plus, True) - ordinate(x_minus, True)) / (x_plus - x_minus)
+        dyl = (ordinate(x_plus, False) - ordinate(x_minus, False)) / (x_plus - x_minus)
+
+        return yu, yl, dyu, dyl
+
     def compute_geometry_derivatives(self):
         '''
         Compute airfoil geometry's derivatives (equivalent to BODY)
@@ -866,7 +945,15 @@ class PyTSFoil(object):
         if xfoil[0] == 0.0:
             fxu[0] = (fu[1] - fu[0]) / (xfoil[1] - xfoil[0])
             fxl[0] = (fl[1] - fl[0]) / (xfoil[1] - xfoil[0])
-        
+
+        # A spline of y(x) oscillates where the input has near-vertical point pairs at a
+        # round leading edge, and each mesh samples a different part of the oscillation.
+        # The contour method replaces the surface values and slopes above.
+        if self.config['slope_method'] == 'contour':
+            fu, fl, fxu, fxl = [value * delinv for value in self.compute_contour_slopes()]
+        elif self.config['slope_method'] != 'spline':
+            raise ValueError(f"slope_method must be 'spline' or 'contour', got {self.config['slope_method']!r}")
+
         # Compute volume by Simpson's rule
         vol = integrate.simpson(y=fu-fl, x=xfoil)
         
@@ -1046,6 +1133,12 @@ class PyTSFoil(object):
         self.data_summary['cm'] = tsf.solver_base.pitch(cmfact)
         self.data_summary['cpstar'] = self._cpstar
         self.data_summary['flag_cfs'] = bool(tsf.common_data.flag_cfs)
+
+        # Status of the last Fortran SOLVE call
+        self.data_summary['converged'] = bool(tsf.solver_data.solve_converged)
+        self.data_summary['diverged'] = bool(tsf.solver_data.abort1)
+        self.data_summary['iterations'] = int(tsf.solver_data.solve_iterations)
+        self.data_summary['error'] = float(tsf.solver_data.solve_error)
             
     def output_field(self) -> None:
         '''

@@ -7,17 +7,12 @@ import subprocess
 import shutil
 from importlib.resources import files
 
-# Enable access to the tsfoil_fortran module
-repo_path = os.path.dirname(os.path.abspath(__file__))
-if repo_path not in sys.path:
-    sys.path.append(repo_path)
-
 def _check_and_compile_fortran():
     """
     Check if Fortran module exists, if not, try to compile it automatically
     """
     try:
-        import tsfoil_fortran
+        from . import tsfoil_fortran
         return True
     except ImportError:
         print("Fortran module not found. Attempting automatic compilation...")
@@ -46,7 +41,7 @@ def _check_and_compile_fortran():
                 importlib.invalidate_caches()
 
                 # Try importing again
-                import tsfoil_fortran
+                from . import tsfoil_fortran
                 return True
             except subprocess.CalledProcessError as e:
                 print(f"✗ Automatic compilation failed: {e}")

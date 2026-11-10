@@ -61,6 +61,12 @@ module common_data
     integer :: ITER_START_CFS = 100   ! Iteration when CFS can start being triggered
     real    :: DXTE_CFS = 0.05        ! Monitor supersonic appearance in [1-DX, 1+DX] for CFS triggering
 
+    ! Shock operator and lift-based convergence
+    logical :: FCR = .true.           ! Fully conservative relaxation (TSFOIL2 FCR); .false. = non-conservative
+    integer :: CL_WINDOW = 0          ! Iterations between lift checks for convergence (0 = off)
+    real    :: CL_TOL = 1.0E-5        ! Lift change over CL_WINDOW iterations accepted as converged
+    real    :: CL_ERROR_MAX = 1.0E-3  ! Largest update error allowed with lift-based convergence
+
     ! ------------------------------------------------
     ! Mesh and geometry parameters and arrays
     ! ------------------------------------------------
@@ -147,6 +153,11 @@ contains
         EPS_AMPL = 200.0
         ITER_START_CFS = 100
         DXTE_CFS = 0.05
+
+        FCR = .true.
+        CL_WINDOW = 0
+        CL_TOL = 1.0E-5
+        CL_ERROR_MAX = 1.0E-3
 
         X = 0.0
         Y = 0.0

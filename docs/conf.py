@@ -36,7 +36,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # The Fortran extension module may not be compiled in the build environment.
 # Mock it so that autodoc can import pytsfoil without errors.
-autodoc_mock_imports = ['tsfoil_fortran']
+autodoc_mock_imports = ['pytsfoil.tsfoil_fortran']
 
 autodoc_default_options = {
     'members': True,

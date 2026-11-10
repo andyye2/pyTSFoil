@@ -57,7 +57,8 @@ version = {attr = "pytsfoil._version.__version__"}
 include = ["pytsfoil*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.f", "*.exe", "*.f90", "*.pyf"]
+# The compiled extension ships with a regular install
+"*" = ["*.f", "*.exe", "*.f90", "*.pyf", "*.so", "*.pyd"]
 
 [tool.setuptools]
 license-files = []  # Disable automatic license file inclusion

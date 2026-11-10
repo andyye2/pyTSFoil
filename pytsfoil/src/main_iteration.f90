@@ -15,7 +15,7 @@ contains
     subroutine SYOR(I1, I2, OUTERR, BIGRL, IRL, JRL, IERROR, JERROR, ERROR)
         use common_data, only: X, IUP, IDOWN, ILE, ITE, JMIN, JMAX, JUP, JLOW, JTOP, JBOT
         use common_data, only: AK, EPS, N_MESH_POINTS
-        use common_data, only: CFS_TRIGGERED, BETA_SONIC, EPS_AMPL
+        use common_data, only: CFS_TRIGGERED, BETA_SONIC, EPS_AMPL, FCR
         use solver_functions, only: BCEND
         use solver_data, only: P, PJUMP, DIAG, RHS, FXUBC, FXLBC, EMU, POLD, WI
         use solver_data, only: CXL, CXC, CXR, CXXL, CXXC, CXXR, C1, CYYC, CYYD, CYYU
@@ -57,7 +57,14 @@ contains
             do J = JBOT, JTOP
                 if (VC(J) < 0.0) EMU(J,I1) = VC(J)
             end do
-            
+
+            ! Non-conservative relaxation (TSFOIL2 FCR = .false.): drop the shock-point operator
+            if (.not. FCR) then
+                do J = JBOT, JTOP
+                    EMU(J,I2) = EMU(J,I1)
+                end do
+            end if
+
             ! Compute elements of matrix
             do J = JBOT, JTOP
                 DIAG(J) = (EMU(J,I1) - VC(J)) * CXXC(I) * WI + EMU(J,I2) * CXXR(I-1) - CYYC(J)
@@ -205,7 +212,9 @@ contains
         use common_data, only: WE, CVERGE, DVERGE, FLAG_OUTPUT
         use common_data, only: WCIRC
         use common_data, only: FLAG_CFS, CFS_TRIGGERED, ITER_START_CFS, DXTE_CFS
+        use common_data, only: CL_WINDOW, CL_TOL, CL_ERROR_MAX
         use solver_data, only: P, C1, CLFACT, CMFACT, WI, ABORT1, KSTEP
+        use solver_data, only: SOLVE_CONVERGED, SOLVE_ITERATIONS, SOLVE_ERROR
         use solver_data, only: POLD, EMU, THETA, SONVEL
         use solver_base, only: LIFT, PITCH
         use solver_functions, only: VWEDGE, SETBC
@@ -224,6 +233,7 @@ contains
         real :: WEP=0.0, CL_LOCAL=0.0, CM_LOCAL=0.0, ERCIRC=0.0, THA=0.0
         real :: U_LOCAL = 0.0             ! Local velocity for Mode B TE check
         real :: WCIRC_SAVE = 0.0          ! Saved WCIRC for Mode B circulation freeze
+        real :: CL_CHECK = 0.0, CL_PREVIOUS = 0.0 ! Lift at the current and previous lift check
         real :: AM1(2,3)=0.0     ! Mach numbers upstream of shocks
         real :: XSHK(2,3)=0.0    ! Shock x-locations
         real :: THAMAX(2,3)=0.0  ! Maximum wedge angles
@@ -237,6 +247,8 @@ contains
         
         ! Initialize
         ABORT1 = .false.
+        CONVERGED = .false.
+        CL_PREVIOUS = 0.0
         POLD = 0.0
         EMU = 0.0
                 
@@ -407,6 +419,22 @@ contains
                 end if
             end if
 
+            ! Check convergence on lift: the update error has a single-precision floor near CVERGE on fine meshes
+            if (CL_WINDOW > 0) then
+                if (mod(ITER, CL_WINDOW) == 0) then
+                    CL_CHECK = LIFT(CLFACT)
+                    if (ITER > CL_WINDOW .and. abs(CL_CHECK - CL_PREVIOUS) < CL_TOL .and. ERROR <= CL_ERROR_MAX) then
+                        CONVERGED = .true.
+                        if (FLAG_OUTPUT == 1) then
+                            write(*, '(//20X,"........LIFT CONVERGED........")')
+                            write(*, '(A,I0,A)') 'Lift converged after ', ITER, ' iterations.'
+                        end if
+                        exit
+                    end if
+                    CL_PREVIOUS = CL_CHECK
+                end if
+            end if
+
             ! Check convergence
             if (ERROR <= CVERGE) then
                 CONVERGED = .true.
@@ -434,6 +462,11 @@ contains
             write(*, '(//20X,"******  ITERATION LIMIT REACHED  ******")')
             write(*, '(A,I0,A)') 'Iteration limit reached after ', MAXITM, ' iterations.'
         end if
+
+        ! Status of this call for the Python interface
+        SOLVE_CONVERGED = CONVERGED
+        SOLVE_ITERATIONS = min(ITER, MAXITM)
+        SOLVE_ERROR = ERROR
 
     end subroutine SOLVE
 

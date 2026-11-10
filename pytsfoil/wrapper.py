@@ -85,6 +85,7 @@ def run_airfoil_analysis(airfoil_coordinates: np.ndarray,
 
         **TSD solver keys** (passed to ``PyTSFoil.set_config``):
           ``MAXIT``, ``CVERGE``, ``EPS``, ``RIGF``, ``NWDGE``,
+          ``FCR``, ``CL_WINDOW``, ``CL_TOL``, ``CL_ERROR_MAX``, ``slope_method``,
           ``n_point_x``, ``n_point_y``, ``n_point_airfoil``,
           ``flag_output``, ``flag_output_summary``, ``flag_output_shock``,
           ``flag_output_field``, ``flag_print_info``, …
@@ -121,6 +122,10 @@ def run_airfoil_analysis(airfoil_coordinates: np.ndarray,
         ``mau``       Upper-surface Mach number at each point in ``xx``
         ``mal``       Lower-surface Mach number at each point in ``xx``
         ``cpstar``    Critical pressure coefficient (sonic condition)
+        ``converged`` Whether the last TSD solve met its convergence criterion
+        ``diverged``  Whether the last TSD solve stopped at ``DVERGE``
+        ``iterations`` Iterations used by the last TSD solve
+        ``error``     Last update error of the last TSD solve
         ``history``   List of per-iteration dicts from IBL outer loop
                       (empty list when ``flag_IBL=False``)
         ``ibl_upper`` Final IBL result dict for upper surface
@@ -320,6 +325,10 @@ def run_airfoil_analysis(airfoil_coordinates: np.ndarray,
         'mau':      ts.data_summary['mau'],
         'mal':      ts.data_summary['mal'],
         'cpstar':   float(ts.data_summary.get('cpstar', 0.0)),
+        'converged':  ts.data_summary['converged'],
+        'diverged':   ts.data_summary['diverged'],
+        'iterations': ts.data_summary['iterations'],
+        'error':      ts.data_summary['error'],
         'history':  history,
         'ibl_upper': ts.data_summary.get('ibl_upper') if flag_IBL else None,
         'ibl_lower': ts.data_summary.get('ibl_lower') if flag_IBL else None,

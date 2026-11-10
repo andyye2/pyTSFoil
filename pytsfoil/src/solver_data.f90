@@ -53,6 +53,11 @@ module solver_data
     ! Control flags and refinement (from /COM3/)
     logical :: ABORT1 = .false. ! input abort flag
 
+    ! Status of the last SOLVE call
+    logical :: SOLVE_CONVERGED = .false. ! Convergence criterion met
+    integer :: SOLVE_ITERATIONS = 0      ! Iterations used
+    real    :: SOLVE_ERROR = 0.0         ! Maximum update error of the last iteration
+
     real :: WSLP(N_MESH_POINTS,2)   ! Viscous wedge slopes
 
 contains
@@ -115,6 +120,9 @@ contains
         CMFACT = 0.0
 
         ABORT1 = .false.
+        SOLVE_CONVERGED = .false.
+        SOLVE_ITERATIONS = 0
+        SOLVE_ERROR = 0.0
         WSLP = 0.0
 
     end subroutine initialize_solver_data

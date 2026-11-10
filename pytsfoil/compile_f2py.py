@@ -42,7 +42,7 @@ def clean_up_files():
     '''
     print("Cleaning up previous build files...")
     
-    cleanup_patterns = ["*.mod", "*.o", "*.so"]
+    cleanup_patterns = ["*.mod", "*.o", "*.so", "*.pyd"]
     
     if FLAG_GENERATE_SIGNATURE:
         cleanup_patterns.append("*.pyf")
@@ -112,11 +112,12 @@ def compile_module(files) -> Path:
     # Set compiler flags (similar to compile.sh but for f2py)
     fflags = "-O2 -Wall -g -fbacktrace"
 
-    cmd = f"{f2py} --backend=meson --fcompiler=gfortran --f90flags='{fflags}' -c {MODULE_NAME}.pyf {files_str}"
+    # Double quotes work in both POSIX shells and the Windows command prompt
+    cmd = f"{f2py} --backend=meson --fcompiler=gfortran --f90flags=\"{fflags}\" -c {MODULE_NAME}.pyf {files_str}"
     result = run_command(cmd)
-    
-    # Check if the shared library was created
-    so_files = list(Path(".").glob(MODULE_NAME + "*.so"))
+
+    # Check if the shared library was created (.pyd on Windows)
+    so_files = list(Path(".").glob(MODULE_NAME + "*.so")) + list(Path(".").glob(MODULE_NAME + "*.pyd"))
     if not so_files:
         print("ERROR: No shared library (.so) file was created!")
         sys.exit(1)
@@ -185,9 +186,9 @@ def main():
         print("="*60)
         print(f"Python module: {target_so.name}")
         print("\nTo test the module, run:")
-        print("  python3 -c 'import tsfoil_fortran; print(dir(tsfoil_fortran))'")
+        print("  python3 -c 'from pytsfoil import tsfoil_fortran; print(dir(tsfoil_fortran))'")
         print("\nTo use in Python:")
-        print("  import tsfoil_fortran")
+        print("  from pytsfoil import tsfoil_fortran")
         print("  # Access modules like: tsfoil_fortran.common_data")
         print("  # Access parameters like: tsfoil_fortran.common_data.n_mesh_points")
         print("  # Call functions like: tsfoil_fortran.common_data.initialize_common()")
